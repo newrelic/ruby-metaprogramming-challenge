@@ -250,6 +250,14 @@ class MetaCounterTest < Test::Unit::TestCase
     assert_sig_and_count(output, 'A.b', 10)
   end
 
+  def test_module_method
+    output = execute_program('A.b', <<-RB)
+    module A; def self.b; end; end
+    10.times{ A.b}
+    RB
+    assert_sig_and_count(output, 'A.b', 10)
+  end
+
   def test_works_with_single_argument_methods
     output = execute_program('A#b', <<-RB)
     class A; def b(a); puts "I got " + a.inspect ; end; end
