@@ -2,5 +2,5 @@ source 'http://rubygems.org'
 
 gem 'bundler', '>1.0.0'
 
-gem 'debugger'
+gem 'debugger', :require => nil
 gem 'ripper2ruby', :git => 'https://github.com/exKAZUu/ripper2ruby.git'

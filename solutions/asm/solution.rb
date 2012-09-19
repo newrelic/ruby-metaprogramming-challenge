@@ -6,7 +6,6 @@ BEGIN {
 
   require 'ripper'
   require 'ripper2ruby'
-  require 'debugger'
 
   # What good is Object without a snowman?
   class Object
@@ -34,7 +33,7 @@ BEGIN {
         # within the eval'd context to resolve the class name.
         @klass ||= eval(@class_name) rescue return
 
-        if object.is_a?(Class)
+        if object.is_a?(Class) or object.is_a?(Module)
           return unless object == @klass
         else
           if object.class.included_modules.include?(@klass) or object.kind_of?(@klass)
