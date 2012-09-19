@@ -167,6 +167,15 @@ class Class
 end
 
 class Module
+
+  # handle methods like module A; def self.b; end; end
+  def singleton_method_added(method_name)
+    super if defined? super
+    if method_name.to_s == Patcher.signature.method
+      Patcher.patch_method_safely
+    end
+  end
+
   def extend_object_with_counting(base)
     #puts "Module#extend_object called #{base.inspect}"
     extend_object_without_counting(base)
@@ -198,6 +207,7 @@ class Module
   end
   alias :append_features_without_counting :append_features
   alias :append_features :append_features_with_counting
+
 end
 
 # Print our report at exit.
