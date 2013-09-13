@@ -10,13 +10,18 @@ lambda do
   kall = kall.to_sym
   count = 0
   enabled = false
+  stopper = false # Stop stack recursion for Fixnum#+
 
   enabler = Proc.new do |owner|
     original_name = "__#{kall}_original_for_count_calls_to".to_sym
     counter_name = "__#{kall}_counter_for_count_calls_to".to_sym
     owner.class_eval do
       define_method(counter_name) do |*args, &blk|
-        count += 1
+        if !stopper
+          stopper = true
+          count += 1
+          stopper = false
+        end
         send original_name, *args, &blk
       end
       alias_method original_name, kall
