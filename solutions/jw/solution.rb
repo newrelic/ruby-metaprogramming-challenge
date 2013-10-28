@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby 
+#!/usr/bin/env ruby
 
 BEGIN {
 
@@ -30,17 +30,21 @@ BEGIN {
       @target_method = nil
       @method_reference = nil
       @enabled = false
+
+      # Last step, parse the env var & get some data initialized.
+      configure
     end
 
     def enable
-      configure
       @enabled = true
+      handle_signature_change( nil, nil )
     end
 
     def get_curr_method_reference
 
       # First, attempt to find the requested type
       obj = ObjectSpace.const_get( @target_object )
+      # No object, bail.
       return nil if obj.nil?
 
       # Second, attempt to find the method ( of the right type ) and return if found.
@@ -71,56 +75,48 @@ BEGIN {
 
     end
 
-    def get_method_type_functions
-      case @target_type
-        when :instance
-          old_method_type_function = 'instance_method'
-          new_method_type_function = 'define_method'
-        when :class
-          old_method_type_function = 'method'
-          new_method_type_function = 'define_singleton_method'
-      end
-
-      return { old: old_method_type_function, new: new_method_type_function }
-    end
-
     def handle_signature_change( klass, method_name )
-      return unless @enabled
+      return if not @enabled
 
       puts "Signature CHANGE: #{ klass } : #{ method_name }" if $DEBUG
 
-      while_disabled do
+      curr_reference = get_curr_method_reference
 
-        # Short circuit if we can't currently find the method.
-        curr_reference = get_curr_method_reference
+      if( ( not curr_reference.nil? ) and ( not @method_reference == curr_reference ) )
 
-        if( ( not curr_reference.nil? ) and ( not @method_reference == curr_reference ) )
+        # If we get here, either the method hasn't been wrapped OR has been replaced.
 
-          # If we get here, either the method hasn't been wrapped OR has been replaced.
+        while_disabled do
 
-          method_types = get_method_type_functions
+          require 'pry-byebug'
+          binding.pry
 
-          # Instance method.
-          code =<<-CODE
+          obj = ObjectSpace.const_get( @target_object )
 
-            class ::#{ @target_object }
+          target_method = @target_method
 
-              old_method = #{ method_types[:old] }( :#{ @target_method } )
+          case @target_type
+            when :instance
 
-              #{ method_types[:new] }( :#{ @target_method } ) do |*args|
-                Instrumentation.count
-                old_method.bind( self ).call( *args )
+              obj.instance_eval do
+                old_method = instance_method( target_method )
+                define_method( target_method ) do |*args|
+                  Instrumentation.count
+                  old_method( *args )
+                end
               end
 
-            end
-
-          CODE
-
-          # puts code
-          eval code
+            when :class
+              obj.instance_eval do
+                old_method = method( target_method )
+                define_singleton_method( target_method ) do |*args|
+                  Instrumentation.count
+                  old_method( *args )
+                end
+              end
+          end
 
           @method_reference = get_curr_method_reference
-
         end
 
       end
@@ -185,6 +181,9 @@ BEGIN {
   Instrumentation.enable
 }
 
+10.times{ |i| i.to_s.sub! '1', '2' }
+
 END {
   puts Instrumentation.result
 }
+
