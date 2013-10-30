@@ -2,7 +2,11 @@
 
 BEGIN {
 
+  require 'singleton'
+
   class Instrumentation
+
+    include Singleton
 
     class Counter
 
@@ -155,9 +159,6 @@ BEGIN {
 
     # NOTE: the only challenge here is that singleton uses Monitor, which uses 
     #       a bit of Fixnum math, messing up our counts for Fixnum#- & Fixnum#+
-    require 'singleton'
-    include Singleton
-
     def self.enable
       instance.enable
     end
