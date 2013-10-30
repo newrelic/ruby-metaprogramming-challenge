@@ -132,7 +132,7 @@ BEGIN {
       end
 
       def enabled?
-        @enabled
+        @enabled == true
       end
 
       def while_disabled( &block )
@@ -188,8 +188,6 @@ BEGIN {
       @event_handler = EventHandler.new( @replacer )
 
       @finder.from_env( 'COUNT_CALLS_TO' )
-
-      @event_handler.set_enabled( true )
     end
 
     def enable
@@ -254,6 +252,7 @@ BEGIN {
   end
 
   Instrumentation.enable
+  Instrumentation.handle_signature_change
 }
 
 END {
