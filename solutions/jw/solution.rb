@@ -17,7 +17,7 @@ BEGIN {
       end
 
       def count
-        @value = @value.succ
+        @value += 1
       end
 
     end
@@ -42,7 +42,7 @@ BEGIN {
         match_obj = @method_name_regex.match( @target )
 
         if( not match_obj.nil? )
-          @target_object = match_obj[1].capitalize
+          @target_object = match_obj[1]
           @target_type   = ( match_obj[2] == '.' ) ? :class : :instance
           @target_method = match_obj[3].to_sym
         else
