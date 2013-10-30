@@ -2,22 +2,20 @@
 
 BEGIN {
 
-  require 'singleton'
-
   class Instrumentation
 
-    include Singleton
-
     class Counter
-
-      attr_reader :value
 
       def initialize
         @value = 0
       end
 
       def count
-        @value += 1
+        @value = @value.succ
+      end
+
+      def value
+        @value
       end
 
     end
@@ -105,12 +103,14 @@ BEGIN {
         target_method = @finder.target_method
 
         target_object.class_eval do
+
           alias_method temp_name, target_method
 
           define_method( target_method ) do |*args, &block|
             Instrumentation.count
             send( temp_name, *args, &block )
           end
+
         end
 
         # Now, pull a reference to the new version and store it for later.
@@ -131,7 +131,7 @@ BEGIN {
         @enabled = new_state
       end
 
-      def enabled
+      def enabled?
         @enabled
       end
 
@@ -151,38 +151,35 @@ BEGIN {
 
     end
 
-    def self.handle_signature_change
-      instance.handle_signature_change if instance.enabled
-    end
+    ## MODULE METHODS ########################################################
+
+    # NOTE: the only challenge here is that singleton uses Monitor, which uses 
+    #       a bit of Fixnum math, messing up our counts for Fixnum#- & Fixnum#+
+    require 'singleton'
+    include Singleton
 
     def self.enable
-      set_enabled( true )
-      handle_signature_change
+      instance.enable
     end
 
     def self.disable
-      set_enabled( false )
+      instance.disable
     end
 
-    def self.enabled
-      instance.enabled
+    def self.count
+      instance.count
     end
 
-    def self.while_disable
-      set_enabled( false )
-    end
-
-    def self.set_enabled( new_state = true )
-      instance.set_enabled( new_state )
+    def self.handle_signature_change( arg = nil )
+      instance.handle_signature_change
     end
 
     def self.result
       instance.result
     end
 
-    def self.count
-      instance.count
-    end
+
+    ## INSTANCE METHODS ######################################################
 
     def initialize
       @counter       = Counter.new
@@ -191,18 +188,20 @@ BEGIN {
       @event_handler = EventHandler.new( @replacer )
 
       @finder.from_env( 'COUNT_CALLS_TO' )
+
+      @event_handler.set_enabled( true )
     end
 
-    def set_enabled( new_state = true )
-      @event_handler.set_enabled( new_state == true )
+    def enable
+      @event_handler.set_enabled( true )
     end
 
-    def enabled
-      @event_handler.enabled
+    def disable
+      @event_handler.set_enabled( false )
     end
 
-    def handle_signature_change
-      @event_handler.handle_signature_change if enabled
+    def enabled?
+      @event_handler.enabled?
     end
 
     def count
@@ -210,8 +209,16 @@ BEGIN {
     end
 
     def result
-      "#{ @finder.target } called #{ @counter.value } time#{ @counter.value == 1 ? '' : 's' }."
+      target = @finder.target
+      count  = @counter.value
+
+      "#{ target } called #{ count } time#{ ( count == 1 ) ? '' : 's' }"
     end
+
+    def handle_signature_change
+      @event_handler.handle_signature_change
+    end
+
 
   end
 
@@ -219,23 +226,28 @@ BEGIN {
 
     k.class_eval do
 
-      define_method( :handle_signature_change ) do |arg|
-        Instrumentation.handle_signature_change if Instrumentation.enabled
+      # Wrap all appropriate class/module modification notification methods.
+      [ 
+        [ :method_added ],
+        [ :method_removed ],
+        [ :method_undefined ],
+        [ :singleton_method_added ],
+        [ :singleton_method_removed ],
+        [ :singleton_method_undefined ],
+        [ :included ],
+        [ :extended ],
+        [ :prepended ],
+        [ :inherited, Class ]
+      ].each do |meth|
+        next unless ( meth.size == 1 ) or ( meth[1] == k )
+
+        old_method = method( meth[0] )
+
+        define_method( meth[0] ) do |*args|
+          Instrumentation.handle_signature_change
+          old_method.call( *args )
+        end
       end
-
-      alias_method :method_added, :handle_signature_change
-      alias_method :method_removed, :handle_signature_change
-      alias_method :method_undefined, :handle_signature_change
-
-      alias_method :singleton_method_added, :handle_signature_change
-      alias_method :singleton_method_removed, :handle_signature_change
-      alias_method :singleton_method_undefined, :handle_signature_change
-
-      alias_method :included, :handle_signature_change
-      alias_method :extended, :handle_signature_change
-      alias_method :prepended, :handle_signature_change
-
-      alias_method :inherited, :handle_signature_change if k == Class
 
     end
 
