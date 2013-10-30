@@ -6,6 +6,10 @@ BEGIN {
 
   class Instrumentation
 
+    # NOTE: Singleton unfortunately uses Fixnum + & - operations, which causes
+    #       a slight skew (+1) in the result numbers when those methods are the
+    #       instrumentation target. Off by one is okay with me vs a lot of
+    #       edge case code.
     include Singleton
 
     class Counter
@@ -157,8 +161,6 @@ BEGIN {
 
     ## MODULE METHODS ########################################################
 
-    # NOTE: the only challenge here is that singleton uses Monitor, which uses 
-    #       a bit of Fixnum math, messing up our counts for Fixnum#- & Fixnum#+
     def self.enable
       instance.enable
     end
