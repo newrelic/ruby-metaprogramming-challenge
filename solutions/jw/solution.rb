@@ -12,12 +12,12 @@ BEGIN {
 
       attr_reader :value
 
-      def initialize        
+      def initialize
         @value = 0
       end
 
-      def count        
-        @value += 1
+      def count
+        @value = @value.succ
       end
 
     end
@@ -26,7 +26,8 @@ BEGIN {
 
       attr_reader :target_object, :target_type, :target_method, :target
 
-      def initialize( target_object = nil, target_method = nil, target_type = nil )        @target_object = target_object
+      def initialize( target_object = nil, target_method = nil, target_type = nil )
+        @target_object = target_object
         @target_method = target_method
         @target_type   = target_type
         @target        = nil
@@ -42,7 +43,7 @@ BEGIN {
 
         if( not match_obj.nil? )
           @target_object = match_obj[1].capitalize
-          @target_type = ( match_obj[2] == '.' ) ? :class : :instance
+          @target_type   = ( match_obj[2] == '.' ) ? :class : :instance
           @target_method = match_obj[3].to_sym
         else
           raise "Unable to parse ENV var value '#{ @target }'."
@@ -51,44 +52,28 @@ BEGIN {
       end
 
       def find_object
+
         return nil if @target_object.nil?
 
-        result = nil
-
         begin
-          result = ObjectSpace.const_get( @target_object )
-        rescue NameError => err
-          # Nothing to do here. @target doesn't exist yet.
-        end
-
-        result
-      end
-
-      def find_method
-        found_obj = find_object
-        if found_obj.nil? or @target_type.nil? or @target_method.nil?
+          return Object.const_get( @target_object )
+        rescue NameError
           return nil
         end
 
-        method_obj = nil
+      end
 
-        begin
+      def find_method
 
-          case @target_type
-            when :instance
-              method_obj = found_obj.instance_method( @target_method )
-            when :class
-              method_obj = found_obj.method( @target_method )
-          end
+        # Ensure the requested class/module exists.
+        found_obj = find_object
+        return nil if found_obj.nil?
 
-          puts "Found: #{ method_obj }"
+        found_obj = found_obj.singleton_class if @target_type == :class
 
-        rescue NameError => err
-          # Nothing to do here ... 
-          puts "ERROR: #{ err }"
-        end
+        return nil unless found_obj.instance_methods.include?( @target_method )
 
-        method_obj
+        found_obj.instance_method( @target_method )
 
       end
 
@@ -102,73 +87,34 @@ BEGIN {
       end
 
       def gen_temp_func_name
-        chars = %w( 0 1 2 3 4 5 6 7 8 9 )
-
         char_string = ''
-        4.times { char_string << chars[ rand( chars.length ) ] }
+        4.times { char_string << rand( '0'.ord .. '9'.ord ).chr }
 
         "instrumented_temp_func_#{ char_string }".to_sym
       end
 
-      def prefix_class_method
-        object = @finder.find_object
-        target_method = @finder.target_method
-
-        return if object.nil?
-
-        temp_name = gen_temp_func_name
-
-        object.instance_eval do
-
-          alias_method temp_name, target_method
-
-          define_method( target_method ) do |*args, &block|
-            Instrumentation.count
-            send( temp_name, *args, &block )
-          end
-
-        end
-
-      end
-
-      def prefix_instance_method
-        object = @finder.find_object
-        target_method = @finder.target_method
-
-        return if object.nil?
-
-        temp_name = gen_temp_func_name
-
-        object.class_eval do
-
-          alias_method temp_name, target_method
-
-          define_method( target_method ) do |*args, &block|
-            Instrumentation.count
-            send( temp_name, *args, &block )
-          end
-
-        end
-
-      end
-
       def add_count_wrapper
-        curr_reference = @finder.find_method
 
+        curr_reference = @finder.find_method
         return if ( curr_reference.nil? ) or ( curr_reference == @method_reference )
 
-        # Handle prefixing the method.
-        if( @finder.target_type == :instance )
-          prefix_instance_method
-        else
-          prefix_class_method
+        target_object = @finder.find_object
+        target_object = target_object.singleton_class if @finder.target_type == :class
+
+        temp_name     = gen_temp_func_name
+        target_method = @finder.target_method
+
+        target_object.class_eval do
+          alias_method temp_name, target_method
+
+          define_method( target_method ) do |*args, &block|
+            Instrumentation.count
+            send( temp_name, *args, &block )
+          end
         end
 
-        # Now, pull a reference to the new version.
-        new_reference = @finder.find_method
-
-        # And store it for later.
-        @method_reference = new_reference
+        # Now, pull a reference to the new version and store it for later.
+        @method_reference = @finder.find_method
 
       end
 
@@ -177,8 +123,7 @@ BEGIN {
     class EventHandler
 
       def initialize( replacer_object )
-        @enabled = false
-
+        @enabled  = false
         @replacer = replacer_object
       end
 
@@ -270,94 +215,28 @@ BEGIN {
 
   end
 
-  class Module
+  [ Class, Module ].each do |k|
 
-    def handle_signature_change( _ )
-      Instrumentation.handle_signature_change if Instrumentation.enabled
-    end
+    k.class_eval do
 
-    # alias :old_method_added :method_added
-    # alias :old_method_removed :method_removed
-    # alias :old_method_undefined :method_undefined
+      define_method( :handle_signature_change ) do |arg|
+        Instrumentation.handle_signature_change if Instrumentation.enabled
+      end
 
-    def method_added( method_name )
-      handle_signature_change( method_name )
-      # old_method_added( method_name )
-    end
+      alias_method :method_added, :handle_signature_change
+      alias_method :method_removed, :handle_signature_change
+      alias_method :method_undefined, :handle_signature_change
 
-    def method_removed( method_name )
-      handle_signature_change( method_name )
-      # old_method_removed( method_name )
-    end
+      alias_method :singleton_method_added, :handle_signature_change
+      alias_method :singleton_method_removed, :handle_signature_change
+      alias_method :singleton_method_undefined, :handle_signature_change
 
-    def method_undefined( method_name )
-      handle_signature_change( method_name )
-      # old_method_undefined( method_name )
-    end
+      alias_method :included, :handle_signature_change
+      alias_method :extended, :handle_signature_change
+      alias_method :prepended, :handle_signature_change
 
-    # alias :old_singleton_method_added :singleton_method_added
-    # alias :old_singleton_method_removed :singleton_method_removed
-    # alias :old_singleton_method_undefined :singleton_method_undefined
+      alias_method :inherited, :handle_signature_change if k == Class
 
-    def singleton_method_added( method_name )
-      handle_signature_change( method_name )
-      # old_singleton_method_added( method_name )
-    end
-
-    def singleton_method_removed( method_name )
-      handle_signature_change( method_name )
-      # old_singleton_method_removed( method_name )
-    end
-
-    def singleton_method_undefined( method_name )
-      handle_signature_change( method_name )
-      # old_singleton_method_undefined( method_name )
-    end
-
-  end
-
-  class Class
-
-    def handle_signature_change( _ )
-      Instrumentation.handle_signature_change if Instrumentation.enabled
-    end
-
-    # alias :old_method_added :method_added
-    # alias :old_method_removed :method_removed
-    # alias :old_method_undefined :method_undefined
-
-    def method_added( method_name )
-      handle_signature_change( method_name )
-      # old_method_added( method_name )
-    end
-
-    def method_removed( method_name )
-      handle_signature_change( method_name )
-      # old_method_removed( method_name )
-    end
-
-    def method_undefined( method_name )
-      handle_signature_change( method_name )
-      # old_method_undefined( method_name )
-    end
-
-    # alias :old_singleton_method_added :singleton_method_added
-    # alias :old_singleton_method_removed :singleton_method_removed
-    # alias :old_singleton_method_undefined :singleton_method_undefined
-
-    def singleton_method_added( method_name )
-      handle_signature_change( method_name )
-      # old_singleton_method_added( method_name )
-    end
-
-    def singleton_method_removed( method_name )
-      handle_signature_change( method_name )
-      # old_singleton_method_removed( method_name )
-    end
-
-    def singleton_method_undefined( method_name )
-      handle_signature_change( method_name )
-      # old_singleton_method_undefined( method_name )
     end
 
   end
@@ -365,47 +244,10 @@ BEGIN {
   Instrumentation.enable
 }
 
-
-# class Foo
-#   def bar
-#     :a
-#   end
-
-#   def self.bam
-#     :b
-#   end
-# end
-
-# class A
-#   class B
-#     class C
-#       class D
-#         class E
-#           def b
-#           end
-#         end
-#       end
-#     end
-#   end
-# end
-
-# module Super
-#   def self.duper
-#   end
-# end
-
-# 10.times do 
-#   Foo.bam
-#   Foo.new.bar
-#   A::B::C::D::E.new.b
-#   4 - 4
-#   Super.duper
-# end
-
-#10.times { |n| n.to_s.sub! '1', '2' }
-
-
 END {
+
+  Instrumentation.disable
+
   puts Instrumentation.result
 }
 
